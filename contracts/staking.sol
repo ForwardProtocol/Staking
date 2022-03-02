@@ -1,3 +1,7 @@
+/**
+ *Submitted for verification at polygonscan.com on 2022-02-24
+*/
+
 // File: @openzeppelin/contracts/utils/Context.sol
 
 // SPDX-License-Identifier: MIT
@@ -1061,7 +1065,7 @@ contract Staking is Ownable, ReentrancyGuard {
     uint256 public minLockTime;
 
     // Max Lock time from pool start 
-    uint256 public totalLockTime = 1440 minutes;
+    uint256 public totalLockTime = 367200 seconds;
 
     // Pool end Time
     uint256 public poolEndTime;
