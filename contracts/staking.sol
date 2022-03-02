@@ -1060,6 +1060,12 @@ contract Staking is Ownable, ReentrancyGuard {
     // Min locktime
     uint256 public minLockTime;
 
+    // Max Lock time from pool start 
+    uint256 public totalLockTime = 1440 minutes;
+
+    // Pool end Time
+    uint256 public poolEndTime;
+
     // Check lock is enable or not
     bool public isLockEnable;
 
@@ -1072,12 +1078,14 @@ contract Staking is Ownable, ReentrancyGuard {
     // Info of each user that stakes tokens (stakedToken)
     mapping(address => UserInfo) public userInfo;
 
+    // List of users who take part in staking
     EnumerableSet.AddressSet private holders;
 
     struct UserInfo {
         uint256 amount; // How many staked tokens the user has provided
         uint256 rewardDebt; // Reward debt
         uint256 totalEarned; // Total earned reward 
+        uint256 totalBonus; // Total bonus earned
         uint256 depositTime; // Deposit time
         uint256 lockTime; //Deposit will be lock for time
     }
@@ -1087,8 +1095,6 @@ contract Staking is Ownable, ReentrancyGuard {
     event EmergencyWithdraw(address indexed user, uint256 amount);
     event NewStartAndEndBlocks(uint256 startBlock, uint256 endBlock);
     event NewRewardPerBlock(uint256 rewardPerBlock);
-    event NewPoolLimit(uint256 poolLimitPerUser);
-    event RewardsStop(uint256 blockNumber);
     event Withdraw(address indexed user, uint256 amount);
 
     /*
@@ -1098,7 +1104,7 @@ contract Staking is Ownable, ReentrancyGuard {
      * @param _rewardPerBlock: reward per block (in rewardToken)
      * @param _startBlock: start block
      * @param _bonusEndBlock: end block
-     * @param _poolLimitPerUser: pool limit per user in stakedToken (if any, else 0)
+     * @param _minLockTime: pool minimum Lock time for depositing tokens 
      * @param _admin: admin address with ownership
      */
     function initialize(
@@ -1121,6 +1127,7 @@ contract Staking is Ownable, ReentrancyGuard {
         startBlock = _startBlock;
         bonusEndBlock = _bonusEndBlock;
         minLockTime = _minLockTime;
+        poolEndTime = block.timestamp.add(totalLockTime);
 
         uint256 decimalsRewardToken = uint256(rewardToken.decimals());
         require(decimalsRewardToken < 30, "Must be inferior to 30");
@@ -1136,12 +1143,34 @@ contract Staking is Ownable, ReentrancyGuard {
         transferOwnership(_admin);
     }
 
+    /*
+     * @notice Set lock enable
+     */
     function setLockEnable() public onlyOwner{
         isLockEnable = true;
     }
 
+    /*
+     * @notice Set lock disable
+     */
     function setLockDisable() public onlyOwner{
         isLockEnable = false;
+    }
+
+    /*
+     * @notice Set Total Lock time
+     * @param time: time in seconds
+     */
+    function setTotalLockTime(uint256 time) public onlyOwner{
+        totalLockTime = time;
+    }
+
+    /*
+     * @notice Set Total Lock time
+     * @param time: unix timestamp
+     */
+    function setPoolEndTime(uint256 time) public onlyOwner{
+        poolEndTime = time;
     }
 
     /*
@@ -1154,16 +1183,26 @@ contract Staking is Ownable, ReentrancyGuard {
         _updatePool();
 
         if (user.amount > 0) {
+            // uint256 pending = user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt).mul(user.lockTime.div(15 minutes).mul(1e4)).div(1e4);
             uint256 pending = user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
             if (pending > 0) {
                 user.totalEarned = user.totalEarned.add(pending);
                 rewardToken.safeTransfer(address(msg.sender), pending);
+                uint256 bonus = ((pending.mul(user.lockTime)).div(totalLockTime).mul(1e4)).div(1e4);
+                user.totalBonus = user.totalBonus.add(bonus);
+                rewardToken.safeTransfer(address(msg.sender), bonus);
             }
         }
 
         if (_amount > 0) {
             if(isLockEnable){
-                require(_lockTime >= user.lockTime, "Locktime must be greater than or equal to previous lock time");
+                if(user.depositTime > 0){
+                    uint256 endTime = user.depositTime.add(user.lockTime);
+                    if(endTime > block.timestamp){
+                        require(_lockTime >= endTime.sub(block.timestamp), "Locktime must be greater than or equal to previous lock time");
+                    }
+                }
+                require(block.timestamp.add(_lockTime) <= poolEndTime, "Please enter valid locktime");
                 user.lockTime = _lockTime;
             }
             user.amount = user.amount.add(_amount);
@@ -1195,6 +1234,7 @@ contract Staking is Ownable, ReentrancyGuard {
 
         _updatePool();
 
+        // uint256 pending = user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt).mul(user.lockTime.div(15 minutes).mul(1e4)).div(1e4);
         uint256 pending = user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
 
         if (_amount > 0) {
@@ -1206,6 +1246,9 @@ contract Staking is Ownable, ReentrancyGuard {
         if (pending > 0) {
             user.totalEarned = user.totalEarned.add(pending);
             rewardToken.safeTransfer(address(msg.sender), pending);
+            uint256 bonus = ((pending.mul(user.lockTime)).div(totalLockTime).mul(1e4)).div(1e4);
+            user.totalBonus = user.totalBonus.add(bonus);
+            rewardToken.safeTransfer(address(msg.sender), bonus);
         }
 
         user.rewardDebt = user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR);
@@ -1307,11 +1350,11 @@ contract Staking is Ownable, ReentrancyGuard {
     }
 
     /*
-     * @notice View function to see pending reward on frontend.
+     * @notice View function to see pending bonus on frontend.
      * @param _user: user address
-     * @return Pending reward for a given user
+     * @return Pending bonus for a given user
      */
-    function pendingReward(address _user) external view returns (uint256) {
+    function pendingBonus(address _user) public view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
         if (block.number > lastRewardBlock && stakedTokenSupply != 0) {
@@ -1319,10 +1362,43 @@ contract Staking is Ownable, ReentrancyGuard {
             uint256 forwardReward = multiplier.mul(rewardPerBlock);
             uint256 adjustedTokenPerShare =
                 accTokenPerShare.add(forwardReward.mul(PRECISION_FACTOR).div(stakedTokenSupply));
-            return user.amount.mul(adjustedTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
+            uint256 pending = user.amount.mul(adjustedTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
+            return ((pending.mul(user.lockTime)).div(totalLockTime).mul(1e4)).div(1e4);
         } else {
-            return user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
+            uint256 pending =  user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
+            return ((pending.mul(user.lockTime)).div(totalLockTime).mul(1e4)).div(1e4);
         }
+    }
+
+    /*
+     * @notice View function to see pending reward on frontend.
+     * @param _user: user address
+     * @return Pending reward for a given user
+     */
+    function pendingReward(address _user) public view returns (uint256) {
+        UserInfo storage user = userInfo[_user];
+        uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
+        if (block.number > lastRewardBlock && stakedTokenSupply != 0) {
+            uint256 multiplier = _getMultiplier(lastRewardBlock, block.number);
+            uint256 forwardReward = multiplier.mul(rewardPerBlock);
+            uint256 adjustedTokenPerShare =
+                accTokenPerShare.add(forwardReward.mul(PRECISION_FACTOR).div(stakedTokenSupply));
+            uint256 pending = user.amount.mul(adjustedTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
+            return (pending);
+        } else {
+            uint256 pending =  user.amount.mul(accTokenPerShare).div(PRECISION_FACTOR).sub(user.rewardDebt);
+            return (pending);
+        }
+    }
+
+    /*
+     * @notice View function to see pending total reward on frontend.
+     * @param _user: user address
+     * @return Pending total reward for a given user
+     */
+    function pendingTotalReward(address _user) external view returns (uint256) {
+        uint256 pending = pendingReward(_user).add(pendingBonus(_user));
+        return pending;
     }
 
     /*
@@ -1369,7 +1445,7 @@ contract Staking is Ownable, ReentrancyGuard {
             return;
         }
 
-        uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
+        uint256 stakedTokenSupply = totalStaked;
 
         if (stakedTokenSupply == 0) {
             lastRewardBlock = block.number;
