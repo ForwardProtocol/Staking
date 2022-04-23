@@ -740,7 +740,7 @@ interface IStaking {
     function totalStaked() external view returns(uint256);
 }
 
-contract TokenReward is Ownable{
+contract TokenRewardFlatten is Ownable{
     using SafeMath for uint256;
     using SafeBEP20 for IBEP20;
 

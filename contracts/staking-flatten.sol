@@ -1,6 +1,3 @@
-/**
- *Submitted for verification at polygonscan.com on 2022-02-24
-*/
 
 // File: @openzeppelin/contracts/utils/Context.sol
 
@@ -1032,7 +1029,7 @@ library SafeBEP20 {
 
 // File: contracts/Staking.sol
 
-contract Staking is Ownable, ReentrancyGuard {
+contract StakingFlatten is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeBEP20 for IBEP20;
     using EnumerableSet for EnumerableSet.AddressSet;
